@@ -1,6 +1,7 @@
 /* Backend snapshot rows are normalized at this boundary before reaching the UI. */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { BusinessHour, Canteen, ForecastReport, KitchenStation, ManagementSetup, MenuItem, Order, Outlet, OwnerActivity, OwnerAlert, PosTerminal, Printer, PrinterRoute, RushBoard, TaxRate, TeamMember } from '../types'
+import { createRequestId } from '../lib/request-id'
 
 const apiBaseUrl = (import.meta.env.VITE_MEALY_API_BASE_URL ?? '').trim().replace(/\/$/, '')
 
@@ -139,7 +140,7 @@ async function create<T>(path: string, body: unknown): Promise<T> {
   const token = accessToken()
   if (!token) throw new Error('Sign in is required. No Mealy access token is configured.')
   const response = await fetch(`${apiBaseUrl}${path}`, {
-    method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() }, body: JSON.stringify(body),
+    method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', 'idempotency-key': createRequestId() }, body: JSON.stringify(body),
   })
   const payload = await response.json() as { data?: T; error?: { message?: string } }
   if (!response.ok || !payload.data) throw new Error(payload.error?.message ?? `Mealy API returned HTTP ${response.status}`)

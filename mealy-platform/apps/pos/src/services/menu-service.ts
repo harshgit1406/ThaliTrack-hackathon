@@ -1,4 +1,5 @@
 import type { CartLine, MenuItem, PosOrder } from '../types'
+import { createRequestId } from '../lib/request-id'
 
 const apiBaseUrl = (import.meta.env.VITE_MEALY_API_BASE_URL ?? '').trim().replace(/\/$/, '')
 const outletId = (import.meta.env.VITE_MEALY_OUTLET_ID ?? '').trim()
@@ -185,7 +186,7 @@ export async function createCounterOrder(lines: CartLine[], note: string): Promi
   if (!counterId) throw new Error('Configure VITE_MEALY_COUNTER_ID before creating counter orders.')
   const response = await apiRequest<{ data: { order: CreatedOrderSnapshot } }>('/v1/orders', {
     method: 'POST',
-    headers: { 'idempotency-key': crypto.randomUUID() },
+    headers: { 'idempotency-key': createRequestId() },
     body: JSON.stringify({
       outlet_id: outletId,
       counter_id: counterId,
@@ -220,7 +221,7 @@ export async function createOfflineCashOrder(lines: CartLine[], note: string, co
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'idempotency-key': crypto.randomUUID(),
+      'idempotency-key': createRequestId(),
       ...(gatewayToken ? { 'x-mealy-gateway-token': gatewayToken } : {}),
     },
     body: JSON.stringify({
@@ -276,7 +277,7 @@ export async function cancelOrder(orderId: string, note: string): Promise<void> 
 export async function refundOrder(orderId: string, note: string, externalReference?: string): Promise<void> {
   await apiRequest(`/v1/pos/orders/${encodeURIComponent(orderId)}/refund`, {
     method: 'POST',
-    headers: { 'idempotency-key': crypto.randomUUID() },
+    headers: { 'idempotency-key': createRequestId() },
     body: JSON.stringify({ reason_code: 'customer_request', note, ...(externalReference ? { external_reference: externalReference } : {}) }),
   })
 }
@@ -288,7 +289,7 @@ export async function settleCounterOrder(
 ): Promise<Receipt | null> {
   const response = await apiRequest<{ data: { receipt: Receipt | null } }>(`/v1/pos/orders/${encodeURIComponent(orderId)}/settle`, {
     method: 'POST',
-    headers: { 'idempotency-key': crypto.randomUUID() },
+    headers: { 'idempotency-key': createRequestId() },
     body: JSON.stringify({ shift_id: shiftId, tenders, issue_receipt: true }),
   })
   return response.data.receipt

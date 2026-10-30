@@ -1,4 +1,5 @@
 import type { CartLine, DiscoveryCampus, OutletCatalog, PickupSlot, QueueStatus, Quote, StudentOrder, StudentSession, SurplusOffer } from './types'
+import { createRequestId } from './request-id'
 
 const apiBaseUrl = (import.meta.env.VITE_MEALY_API_BASE_URL ?? '').trim().replace(/\/$/, '')
 const outletId = (import.meta.env.VITE_MEALY_OUTLET_ID ?? '').trim()
@@ -76,7 +77,7 @@ export async function getSurplusOffers(): Promise<SurplusOffer[]> {
 }
 
 export async function createStudentOrder(lines: CartLine[], pickupSlotId: string, counterId: string): Promise<StudentOrder> {
-  const idempotencyKey = crypto.randomUUID()
+  const idempotencyKey = createRequestId()
   const response = await request<{ data: { order: StudentOrder } }>('/v1/orders', {
     method: 'POST',
     headers: { 'idempotency-key': idempotencyKey },
