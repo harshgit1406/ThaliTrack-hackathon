@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-30 - Student order notifications
+
+- Added compact added-to-cart confirmations, an order-placed token popup, and live in-app notifications when an order status changes.
+- Ready-for-pickup now uses a prominent notification telling the student to collect the order from the counter.
+
 ## 2026-10-30 - POS menu photos made self-contained
 
 - Bundled the ten hackathon menu photos with the POS so catalog cards no longer depend on the student-web development server.

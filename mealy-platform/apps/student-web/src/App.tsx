@@ -1,6 +1,6 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from 'motion/react'
-import { ArrowLeft, ArrowRight, Bell, ChevronRight, Clock3, CreditCard, HelpCircle, Home, Info, LoaderCircle, MapPin, Minus, PackageOpen, Plus, ReceiptText, RefreshCw, Search, ShoppingBag, SlidersHorizontal, UserRound, UtensilsCrossed, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Bell, BellRing, CheckCircle2, ChevronRight, Clock3, CreditCard, HelpCircle, Home, Info, LoaderCircle, MapPin, Minus, PackageOpen, Plus, ReceiptText, RefreshCw, Search, ShoppingBag, SlidersHorizontal, UserRound, UtensilsCrossed, X } from 'lucide-react'
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router'
 import mealyLogo from '../../pos/src/assets/mealy-logo.png'
 import { configuredOutletId, createDemoSession, createStudentOrder, getCatalog, getDiscovery, getOrder, getOrders, getPickupSlots, getQueueStatus, getQuote, getSurplusOffers, readSession, requestOtp, saveSession, verifyOtp } from './api'
@@ -9,6 +9,25 @@ import type { CatalogItem, DiscoveryCampus, OutletCatalog, PickupSlot, QueueStat
 
 type CatalogState = { catalog: OutletCatalog | null; loading: boolean; error: string | null; reload: () => void }
 const CatalogContext = createContext<CatalogState | undefined>(undefined)
+type Notice = { id: number; title: string; detail?: string; tone?: 'success' | 'ready' }
+const NoticeContext = createContext<{ notify: (notice: Omit<Notice, 'id'>) => void } | undefined>(undefined)
+
+function NoticeProvider({ children }: { children: ReactNode }) {
+  const [notices, setNotices] = useState<Notice[]>([])
+  const nextId = useRef(0)
+  const notify = useCallback((notice: Omit<Notice, 'id'>) => {
+    const id = ++nextId.current
+    setNotices((current) => [...current.slice(-2), { ...notice, id }])
+    window.setTimeout(() => setNotices((current) => current.filter((entry) => entry.id !== id)), notice.tone === 'ready' ? 6500 : 2800)
+  }, [])
+  return <NoticeContext.Provider value={{ notify }}>{children}<div className="notice-stack" aria-live="polite">{notices.map((notice) => <motion.div key={notice.id} className={`app-notice ${notice.tone ?? ''}`} initial={{ opacity: 0, y: 18, scale: .96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 8 }}><span>{notice.tone === 'ready' ? <BellRing size={19} /> : <CheckCircle2 size={19} />}</span><div><b>{notice.title}</b>{notice.detail && <small>{notice.detail}</small>}</div><button onClick={() => setNotices((current) => current.filter((entry) => entry.id !== notice.id))} aria-label="Dismiss notification"><X size={15} /></button></motion.div>)}</div></NoticeContext.Provider>
+}
+
+function useNotice() {
+  const context = useContext(NoticeContext)
+  if (!context) throw new Error('useNotice must be used inside NoticeProvider')
+  return context
+}
 
 function CatalogProvider({ children }: { children: ReactNode }) {
   const [catalog, setCatalog] = useState<OutletCatalog | null>(null)
@@ -45,7 +64,7 @@ function titleCase(value: string | null | undefined): string {
 }
 
 export default function App() {
-  return <CatalogProvider><StudentRoutes /></CatalogProvider>
+  return <NoticeProvider><CatalogProvider><StudentRoutes /></CatalogProvider></NoticeProvider>
 }
 
 function StudentRoutes() {
@@ -70,6 +89,7 @@ function AppShell() {
   if (error) return <SystemState title="Live student data is not ready" detail={error} action="Try again" onAction={reload} />
   if (!catalog) return <DiscoveryLanding />
   return <div className="student-shell">
+    <OrderStatusWatcher />
     <Header catalog={catalog} cartCount={count} />
     <aside className="desktop-nav"><Brand /><Navigation /><div className="rail-note"><Info size={16} /><span>Prices and availability refresh from Mealy.</span></div></aside>
     <main className="student-main"><Routes>
@@ -88,6 +108,34 @@ function AppShell() {
     <CartRail catalog={catalog} />
     <MobileNavigation cartCount={count} />
   </div>
+}
+
+function OrderStatusWatcher() {
+  const { notify } = useNotice()
+  const knownStatuses = useRef<Map<string, string>>(new Map())
+  useEffect(() => {
+    if (!readSession()) return
+    let active = true
+    const refresh = async () => {
+      try {
+        const orders = await getOrders()
+        if (!active) return
+        const firstLoad = knownStatuses.current.size === 0
+        for (const order of orders) {
+          const previous = knownStatuses.current.get(order.id)
+          if (!firstLoad && previous && previous !== order.status_code) {
+            const ready = order.status_code === 'ready_for_pickup'
+            notify({ title: ready ? `Token ${order.token_label ?? ''} is ready!` : `Order ${titleCase(order.status_code)}`, detail: ready ? 'Collect it from the counter now.' : `${order.public_number} moved from ${titleCase(previous)} to ${titleCase(order.status_code)}.`, tone: ready ? 'ready' : 'success' })
+          }
+          knownStatuses.current.set(order.id, order.status_code)
+        }
+      } catch { /* The orders screen presents API errors; this watcher stays unobtrusive. */ }
+    }
+    void refresh()
+    const timer = window.setInterval(() => void refresh(), 3_000)
+    return () => { active = false; window.clearInterval(timer) }
+  }, [notify])
+  return null
 }
 
 function Brand() { return <Link className="brand" to="/" aria-label="Mealy home"><img src={mealyLogo} alt="Mealy" /></Link> }
@@ -162,9 +210,10 @@ function ItemGrid({ catalog, items, emptyText = 'No live menu items are availabl
 
 function ItemCard({ catalog, item }: { catalog: OutletCatalog; item: CatalogItem }) {
   const { add } = useCart()
+  const { notify } = useNotice()
   const itemPath = `/canteens/${catalog.outlet.canteen_id}/items/${item.id}`
   const defaultVariant = item.variants.find((variant) => variant.is_default && variant.is_available)
-  return <motion.article layoutId={`item:${item.id}:card`} className={`item-card ${item.is_available ? '' : 'unavailable'}`}><Link to={itemPath} className="item-card-link"><FoodVisual item={item} /><div className="item-copy"><div><span className="food-tag">{titleCase(item.food_type)}</span><h3>{item.name}</h3><p>{item.short_description || 'Details are not available for this item yet.'}</p></div><strong>{money(defaultVariant?.price_minor ?? item.price_minor, item.currency_code)}</strong></div></Link><button className="add-button" disabled={!item.is_available} onClick={() => add(item, defaultVariant?.id)} aria-label={`Add ${item.name} to cart`}>{item.is_available ? <Plus size={18} /> : <X size={17} />}</button></motion.article>
+  return <motion.article layoutId={`item:${item.id}:card`} className={`item-card ${item.is_available ? '' : 'unavailable'}`}><Link to={itemPath} className="item-card-link"><FoodVisual item={item} /><div className="item-copy"><div><span className="food-tag">{titleCase(item.food_type)}</span><h3>{item.name}</h3><p>{item.short_description || 'Details are not available for this item yet.'}</p></div><strong>{money(defaultVariant?.price_minor ?? item.price_minor, item.currency_code)}</strong></div></Link><button className="add-button" disabled={!item.is_available} onClick={() => { add(item, defaultVariant?.id); notify({ title: 'Added to cart', detail: `${item.name} is in your order.`, tone: 'success' }) }} aria-label={`Add ${item.name} to cart`}>{item.is_available ? <Plus size={18} /> : <X size={17} />}</button></motion.article>
 }
 
 function FoodVisual({ item, compact = false }: { item: CatalogItem; compact?: boolean }) { return <motion.div layoutId={`item:${item.id}:image`} className={`food-visual ${compact ? 'compact' : ''}`}>{item.image_url ? <img src={item.image_url} alt="" /> : <span aria-hidden="true">{item.name.slice(0, 2).toUpperCase()}</span>}{!item.is_available && <b>Sold out</b>}</motion.div> }
@@ -174,13 +223,14 @@ function ItemPage({ catalog }: { catalog: OutletCatalog }) {
   const { itemId } = useParams()
   const item = catalog.items.find((entry) => entry.id === itemId)
   const { add } = useCart()
+  const { notify } = useNotice()
   const [variantId, setVariantId] = useState<string | undefined>(item?.variants.find((variant) => variant.is_default && variant.is_available)?.id)
   const [quantity, setQuantity] = useState(1)
   const [note, setNote] = useState('')
   if (!item) return <SystemState title="Item unavailable" detail="This menu item is not available in the current live catalogue." />
   const selectedVariant = item.variants.find((variant) => variant.id === variantId)
   const unitPrice = Number(selectedVariant?.price_minor ?? item.price_minor)
-  return <PageFrame title="Item details" back={() => navigate(-1)}><section className="item-detail"><motion.div layoutId={`item:${item.id}:card`} className="item-detail-card"><FoodVisual item={item} /><div className="detail-heading"><span className="food-tag">{titleCase(item.food_type)}</span><h1><motion.span layoutId={`item:${item.id}:name`}>{item.name}</motion.span></h1><p>{item.short_description || 'This canteen has not added an item description yet.'}</p><strong><motion.span layoutId={`item:${item.id}:price`}>{money(unitPrice, item.currency_code)}</motion.span></strong></div></motion.div><div className="detail-options">{item.variants.length > 0 && <fieldset><legend>Choose a size</legend>{item.variants.map((variant) => <label className={!variant.is_available ? 'option disabled' : 'option'} key={variant.id}><input type="radio" name="variant" disabled={!variant.is_available} checked={variantId === variant.id} onChange={() => setVariantId(variant.id)} /><span>{variant.name}</span><b>{money(variant.price_minor, item.currency_code)}</b></label>)}</fieldset>}<label className="note-field"><span>Add a kitchen note</span><textarea value={note} onChange={(event) => setNote(event.target.value.slice(0, 160))} placeholder="Only if the canteen should know something" /></label></div><footer className="detail-footer"><div className="quantity-stepper"><button onClick={() => setQuantity((value) => Math.max(1, value - 1))} aria-label="Reduce quantity"><Minus size={17} /></button><b>{quantity}</b><button onClick={() => setQuantity((value) => value + 1)} aria-label="Increase quantity"><Plus size={17} /></button></div><button className="primary-action" disabled={!item.is_available} onClick={() => { for (let index = 0; index < quantity; index += 1) add(item, variantId, note); navigate('/cart') }}><ShoppingBag size={18} />{item.is_available ? `Add · ${money(unitPrice * quantity, item.currency_code)}` : 'Sold out'}</button></footer></section></PageFrame>
+  return <PageFrame title="Item details" back={() => navigate(-1)}><section className="item-detail"><motion.div layoutId={`item:${item.id}:card`} className="item-detail-card"><FoodVisual item={item} /><div className="detail-heading"><span className="food-tag">{titleCase(item.food_type)}</span><h1><motion.span layoutId={`item:${item.id}:name`}>{item.name}</motion.span></h1><p>{item.short_description || 'This canteen has not added an item description yet.'}</p><strong><motion.span layoutId={`item:${item.id}:price`}>{money(unitPrice, item.currency_code)}</motion.span></strong></div></motion.div><div className="detail-options">{item.variants.length > 0 && <fieldset><legend>Choose a size</legend>{item.variants.map((variant) => <label className={!variant.is_available ? 'option disabled' : 'option'} key={variant.id}><input type="radio" name="variant" disabled={!variant.is_available} checked={variantId === variant.id} onChange={() => setVariantId(variant.id)} /><span>{variant.name}</span><b>{money(variant.price_minor, item.currency_code)}</b></label>)}</fieldset>}<label className="note-field"><span>Add a kitchen note</span><textarea value={note} onChange={(event) => setNote(event.target.value.slice(0, 160))} placeholder="Only if the canteen should know something" /></label></div><footer className="detail-footer"><div className="quantity-stepper"><button onClick={() => setQuantity((value) => Math.max(1, value - 1))} aria-label="Reduce quantity"><Minus size={17} /></button><b>{quantity}</b><button onClick={() => setQuantity((value) => value + 1)} aria-label="Increase quantity"><Plus size={17} /></button></div><button className="primary-action" disabled={!item.is_available} onClick={() => { for (let index = 0; index < quantity; index += 1) add(item, variantId, note); notify({ title: 'Added to cart', detail: `${quantity} × ${item.name}`, tone: 'success' }); navigate('/cart') }}><ShoppingBag size={18} />{item.is_available ? `Add · ${money(unitPrice * quantity, item.currency_code)}` : 'Sold out'}</button></footer></section></PageFrame>
 }
 
 function CartRail({ catalog, inline = false }: { catalog: OutletCatalog; inline?: boolean }) {
@@ -204,6 +254,7 @@ function HackathonCheckoutPage({ catalog }: { catalog: OutletCatalog }) {
   const [quote, setQuote] = useState<Quote | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [placedOrder, setPlacedOrder] = useState<StudentOrder | null>(null)
   const session = readSession()
   const [checkoutStartedAt] = useState(() => Date.now())
   const signedIn = Boolean(session && Date.parse(session.expires_at) > checkoutStartedAt)
@@ -213,13 +264,13 @@ function HackathonCheckoutPage({ catalog }: { catalog: OutletCatalog }) {
       setQuote(nextQuote); setSlots(nextSlots); setSelectedSlot(nextSlots.find((slot) => slot.remaining_capacity > 0)?.id ?? '')
     }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Checkout could not load.'))
   }, [lines])
-  if (!lines.length) return <Navigate to="/cart" replace />
+  if (!lines.length && !placedOrder) return <Navigate to="/cart" replace />
   const placeOrder = async () => {
     if (!catalog.outlet.counter_id || !selectedSlot) return
     setBusy(true); setError(null)
     try {
       const order = await createStudentOrder(lines, selectedSlot, catalog.outlet.counter_id)
-      clear(); navigate(`/orders/${order.id}`)
+      clear(); setPlacedOrder(order)
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'The order could not be placed.') }
     finally { setBusy(false) }
   }
@@ -227,7 +278,7 @@ function HackathonCheckoutPage({ catalog }: { catalog: OutletCatalog }) {
     <section className="checkout-section"><span className="step-label">1</span><div><h2>10-minute pickup slot</h2><p>Capacity is reserved atomically when you place the order.</p><div className="slot-grid">{slots.map((slot) => <button key={slot.id} disabled={slot.remaining_capacity < 1} className={selectedSlot === slot.id ? 'selected' : ''} onClick={() => setSelectedSlot(slot.id)}><b>{new Date(slot.starts_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</b><small>{slot.remaining_capacity} spots left</small></button>)}</div></div></section>
     <section className="checkout-section"><span className="step-label">2</span><div><h2>{signedIn ? 'Student verified' : 'Choose a demo student'}</h2><p>{signedIn ? `Signed in as ${session?.user.display_name ?? session?.user.displayName ?? 'student'}.` : 'Use one of the two seeded students on separate phones.'}</p>{!signedIn && <Link className="secondary-action" to="/auth">Sign in <ArrowRight size={16} /></Link>}</div></section>
     <section className="checkout-section"><span className="step-label">3</span><div><h2>Mock UPI payment</h2><p>This hackathon-only step simulates a successful UPI payment. No money moves.</p><div className="payment-method-card"><CreditCard size={20} /><span><b>UPI demo payment</b><small>Clearly labelled mock flow for the problem statement.</small></span><span className="payment-status">Demo</span></div></div></section>
-  </div><aside className="checkout-summary"><h2>Order summary</h2><p>{count} item{count === 1 ? '' : 's'} · {catalog.outlet.name}</p>{quote && <dl><div><dt>Subtotal</dt><dd>{money(quote.subtotal_minor, quote.currency_code)}</dd></div><div><dt>Tax and charges</dt><dd>{money(quote.tax_total_minor + quote.charge_total_minor, quote.currency_code)}</dd></div><div className="grand-total"><dt>Total</dt><dd>{money(quote.total_minor, quote.currency_code)}</dd></div></dl>}{error && <div className="quote-error"><Info size={17} />{error}</div>}<button className="primary-action full" disabled={busy || !signedIn || !selectedSlot || !catalog.outlet.counter_id} onClick={() => void placeOrder()}>{busy ? <LoaderCircle size={18} /> : <CreditCard size={18} />}{busy ? 'Placing order…' : 'Pay mock UPI & place order'}</button><small>Full slots are disabled. Your order receives a live token and enters the canteen board immediately.</small></aside></section></PageFrame>
+  </div><aside className="checkout-summary"><h2>Order summary</h2><p>{count} item{count === 1 ? '' : 's'} · {catalog.outlet.name}</p>{quote && <dl><div><dt>Subtotal</dt><dd>{money(quote.subtotal_minor, quote.currency_code)}</dd></div><div><dt>Tax and charges</dt><dd>{money(quote.tax_total_minor + quote.charge_total_minor, quote.currency_code)}</dd></div><div className="grand-total"><dt>Total</dt><dd>{money(quote.total_minor, quote.currency_code)}</dd></div></dl>}{error && <div className="quote-error"><Info size={17} />{error}</div>}<button className="primary-action full" disabled={busy || !signedIn || !selectedSlot || !catalog.outlet.counter_id} onClick={() => void placeOrder()}>{busy ? <LoaderCircle size={18} /> : <CreditCard size={18} />}{busy ? 'Placing order…' : 'Pay mock UPI & place order'}</button><small>Full slots are disabled. Your order receives a live token and enters the canteen board immediately.</small></aside></section>{placedOrder && <div className="order-modal-backdrop" role="presentation"><motion.section className="order-placed-modal" role="dialog" aria-modal="true" aria-labelledby="order-placed-title" initial={{ opacity: 0, scale: .9, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }}><div className="order-success-icon"><CheckCircle2 size={34} /></div><span className="eyebrow">Mock UPI successful</span><h2 id="order-placed-title">Order placed!</h2><p>Your order has reached the canteen and kitchen. Track every status change live.</p><div className="placed-token"><span>Your pickup token</span><strong>{placedOrder.token_label ?? 'Generating…'}</strong><small>{placedOrder.public_number}</small></div><button className="primary-action full" onClick={() => navigate(`/orders/${placedOrder.id}`)}>Track my order <ArrowRight size={18} /></button></motion.section></div>}</PageFrame>
 }
 
 function HackathonOrdersPage() {
@@ -284,7 +335,7 @@ export function LegacyOrdersPage() { return <PageFrame title="Your orders" eyebr
 
 export function LegacyOrderDetailPage() { return <PageFrame title="Order details"><EmptyPanel text="No order record can be shown until student authentication and order retrieval are connected." /></PageFrame> }
 
-function ProfilePage({ catalog }: { catalog: OutletCatalog }) { return <PageFrame title="Profile" eyebrow="Your Mealy account"><section className="profile-grid"><article className="profile-card"><div className="profile-avatar">M</div><div><h2>Sign in to Mealy</h2><p>Phone authentication is not configured in this backend yet.</p></div><Link className="primary-action" to="/auth">Sign-in status</Link></article><section className="settings-list"><Link to="/campus"><MapPin size={19} /><span><b>Pickup context</b><small>{catalog.outlet.name}, {catalog.outlet.canteen_name}</small></span><ChevronRight size={18} /></Link><Link to="/help"><HelpCircle size={19} /><span><b>Help and support</b><small>Order and pickup assistance</small></span><ChevronRight size={18} /></Link><div><Bell size={19} /><span><b>Order notifications</b><small>Available after student account setup</small></span><Info size={18} /></div></section></section></PageFrame> }
+function ProfilePage({ catalog }: { catalog: OutletCatalog }) { return <PageFrame title="Profile" eyebrow="Your Mealy account"><section className="profile-grid"><article className="profile-card"><div className="profile-avatar">M</div><div><h2>Sign in to Mealy</h2><p>Phone authentication is not configured in this backend yet.</p></div><Link className="primary-action" to="/auth">Sign-in status</Link></article><section className="settings-list"><Link to="/campus"><MapPin size={19} /><span><b>Pickup context</b><small>{catalog.outlet.name}, {catalog.outlet.canteen_name}</small></span><ChevronRight size={18} /></Link><Link to="/help"><HelpCircle size={19} /><span><b>Help and support</b><small>Order and pickup assistance</small></span><ChevronRight size={18} /></Link><div><Bell size={19} /><span><b>Order notifications</b><small>Live in-app alerts for every preparation status</small></span><Info size={18} /></div></section></section></PageFrame> }
 
 function CampusPage({ catalog }: { catalog: OutletCatalog }) { return <PageFrame title="Pickup context" eyebrow="Live menu context"><section className="context-page"><div className="context-visual"><MapPin size={26} /></div><span className="eyebrow">Current outlet</span><h1>{catalog.outlet.name}</h1><p>{catalog.outlet.canteen_name} · typical preparation time {catalog.outlet.preparation_lead_minutes} minutes.</p><div className="context-status"><i className={catalog.outlet.accepts_orders ? 'open' : 'closed'} />{catalog.outlet.accepts_orders ? 'Accepting pickup orders' : 'Not accepting orders right now'}</div><small>Campus switching needs the student context API. This page never invents another campus or outlet.</small></section></PageFrame> }
 
