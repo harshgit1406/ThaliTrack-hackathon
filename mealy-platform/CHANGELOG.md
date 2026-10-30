@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-30 - Repository onboarding guide
+
+- Reworked the repository README into a product overview and copy-paste setup guide covering architecture, seeded configuration, every application, demo credentials, multi-device hotspot access, deployment, troubleshooting, and the recommended end-to-end demonstration.
+- Updated the documented product status to reflect the working student order, POS/KOT/KDS, manager synchronization, forecasting, waste, surplus, and notification flows.
+
 ## 2026-10-30 - Manager order synchronization
 
 - Fixed the manager rush board to aggregate live orders from every outlet in the selected canteen instead of reading only the first returned outlet.

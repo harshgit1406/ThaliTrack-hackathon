@@ -1,26 +1,61 @@
-# Mealy local startup guide
+# ThaliTrack by Mealy
 
-This repository contains one Docker-based cloud stack and six applications that run directly on the Windows development machine.
+ThaliTrack is a campus canteen operating system that connects student pre-orders, counter POS billing, kitchen tickets, pickup queues, manager controls, demand forecasting, and food-waste tracking in one product.
 
-## What runs where
+The repository contains a working multi-device demo as well as the foundations needed for a real canteen rollout. A student order appears in the canteen workflow, moves through preparation and pickup, updates the student's phone, and contributes to queue, demand, and waste insights.
 
-| Component | Where it runs locally | Port / URL | Purpose |
-| --- | --- | --- | --- |
-| PostgreSQL 16 | Docker | `localhost:5432` | Authoritative cloud-development database |
-| Database migrations | One-shot Docker container | No port | Applies migrations, then exits successfully |
-| Backend API | Docker | `http://127.0.0.1:8080` | Authentication, catalog, orders, KOT, payments, and administration APIs |
-| Realtime service | Docker | `ws://127.0.0.1:8081` | Backend-owned WebSocket delivery to enrolled outlet gateways |
-| Background worker | Docker | No port | Outbox publication, retries, and background processing |
-| Outlet gateway | Windows / outlet computer | `http://127.0.0.1:8788` | Local SQLite durability and LAN API for KDS/offline outlet work |
-| POS | Windows Electron app | Renderer uses `http://127.0.0.1:5173` | Cashier application |
-| Platform admin | Windows browser dev server | `http://127.0.0.1:5174` | Mealy platform administration |
-| Canteen admin | Windows browser dev server | `http://127.0.0.1:5175` | Canteen owner/manager application |
-| KDS | Preferably served by the gateway | `http://127.0.0.1:8788/kds/` | Kitchen display and ticket actions |
-| Student web | Windows browser dev server | `http://127.0.0.1:5177` | Phone-first campus food browsing and local cart |
+## What the product includes
 
-The migration container showing `Exited (0)` is normal: it is supposed to finish before the API, realtime service, and worker start.
+| Experience | Main capabilities | Local URL |
+| --- | --- | --- |
+| Student app | Live menu and photos, cart, 10-minute pickup slots, simulated UPI checkout, token and live order notifications | `http://127.0.0.1:5177` |
+| Counter POS | Staff sign-in, counter billing, online orders, tender selection, receipts, tokens, and KOT creation | `http://127.0.0.1:5173` |
+| Kitchen display (KDS) | Live kitchen tickets, preparation states, delays, ready and remake actions | `http://127.0.0.1:8788/kds/` |
+| Canteen manager | All-outlet rush board, live order control, forecasting, leftover logging, surplus offers, staff and setup controls | `http://127.0.0.1:5175` |
+| Platform admin | Campus, canteen, outlet, counter, device, and entitlement administration | `http://127.0.0.1:5174` |
+| Backend | PostgreSQL, API, realtime delivery, background worker, audit trail, and outlet synchronization | `http://127.0.0.1:8080` |
 
-Student web is deliberately dynamic: it reads a configured outlet's public catalog, requests backend pricing, and places authenticated pickup orders into 10-minute slots. Production uses phone OTP; `MEALY_DEMO_MODE=true` additionally exposes named hackathon demo users and mock UPI without weakening the production path.
+### End-to-end flow
+
+1. A student selects food and a 10-minute pickup slot in the student app.
+2. The order is priced by the backend and confirmed through the clearly labelled local UPI simulation.
+3. The order appears in the POS/manager views and is sent to the kitchen as a KOT.
+4. Kitchen staff move the ticket from received to preparing to ready.
+5. The student's order timeline and ready-for-pickup notification update automatically.
+6. The manager sees rush load, estimated wait time, tomorrow's dish forecast, leftovers, food saved, and surplus opportunities.
+
+## How forecasting and wait time work
+
+- **Demand forecast:** a lightweight ridge-regression model runs inside the Node.js backend. It learns from 28 days of dish-level orders and leftovers and considers weekday, recent trend, lecture-rush timing, and waste. It predicts the next-day quantity for each dish without requiring a separate paid ML service.
+- **Wait time:** pickup-slot load, open orders, order state, outlet preparation time, and capacity are combined to estimate the live queue. As tickets are accepted, prepared, or completed, the estimate changes.
+- **Food saved:** the dashboard compares forecast-led preparation and logged leftovers against the historical waste baseline. Managers enter closing leftovers so future forecasts adapt to the outlet's real activity.
+
+The development seed supplies 10 dishes, 280 demand-history observations, timetable rush windows, live orders, and a surplus offer so these features are visible immediately.
+
+## Architecture
+
+```text
+Student web ─┐
+POS ─────────┼── REST API ── PostgreSQL
+Manager ─────┘       │
+                     ├── Realtime service
+                     └── Worker / outbox
+                              │
+                    Outlet gateway (SQLite)
+                         ├── KDS
+                         └── local print/KOT queue
+```
+
+The outlet gateway keeps essential counter and kitchen work available on the canteen LAN during an internet interruption and replays queued events when cloud access returns.
+
+## Technology
+
+- React, TypeScript, Vite, and Electron
+- Node.js, Fastify, WebSockets, and background workers
+- PostgreSQL 16 for central data and SQLite at the outlet gateway
+- In-process ridge regression for demand prediction
+- Docker Compose for the local backend
+- Vercel-ready web applications and container-ready backend services
 
 ## Prerequisites
 
@@ -29,7 +64,7 @@ Student web is deliberately dynamic: it reads a configured outlet's public catal
 - Node.js 22 or newer
 - npm
 
-Check the local tools:
+Check the tools:
 
 ```powershell
 docker version
@@ -37,7 +72,7 @@ node --version
 npm --version
 ```
 
-All commands below assume this folder:
+All commands below start here:
 
 ```powershell
 cd C:\Users\Harsh\Desktop\mealy\mealy-platform
@@ -45,31 +80,38 @@ cd C:\Users\Harsh\Desktop\mealy\mealy-platform
 
 ## First-time setup
 
-### 1. Create the private Docker environment files
+### 1. Create private environment files
 
-These files are ignored by Git. Do not commit them.
+Environment files are ignored by Git. Never commit passwords or tokens.
 
 ```powershell
-if (-not (Test-Path .env)) {
-  Copy-Item .env.docker.example .env
-}
+Copy-Item .env.docker.example .env
+Copy-Item apps\backend\.env.example apps\backend\.env
 
-if (-not (Test-Path apps\backend\.env)) {
-  Copy-Item apps\backend\.env.example apps\backend\.env
+$apps = @('pos', 'admin', 'canteen-admin', 'kds', 'outlet-gateway', 'student-web')
+foreach ($app in $apps) {
+  Copy-Item "apps\$app\.env.example" "apps\$app\.env" -ErrorAction SilentlyContinue
 }
 ```
 
-Edit both files:
+In `.env`, replace `MEALY_DB_PASSWORD`. Use the same password in `apps/backend/.env` inside `MEALY_DATABASE_URL`. Also set:
 
-- `.env`: replace `MEALY_DB_PASSWORD`.
-- `apps/backend/.env`: use the same password inside `MEALY_DATABASE_URL`.
-- Keep the Docker database hostname as `postgres`, not `localhost`.
-- Replace `MEALY_BOOTSTRAP_ADMIN_TOKEN` with a long private value.
-- Ensure `MEALY_ALLOWED_ORIGINS` contains the frontend origins you will run, normally ports `5173`, `5174`, `5175`, `5176`, and `5177` on both `localhost` and `127.0.0.1`.
+```text
+MEALY_DEMO_MODE=true
+MEALY_BOOTSTRAP_ADMIN_TOKEN=<a-long-private-random-value>
+```
 
-### 2. Install local application dependencies
+For the included Main Food Court dataset, use these public identifiers:
 
-Run once, and again whenever a package lock changes:
+```text
+OUTLET_ID=e0000000-0000-4000-8000-000000000001
+COUNTER_ID=f0000000-0000-4000-8000-000000000001
+TERMINAL_ID=11000000-0000-4000-8000-000000000001
+```
+
+Set the outlet ID in `apps/student-web/.env`. Set all three IDs in `apps/pos/.env`. Enable `VITE_MEALY_DEMO_MODE=true` in the student and canteen-manager environment files.
+
+### 2. Install application dependencies
 
 ```powershell
 $apps = @('pos', 'admin', 'canteen-admin', 'kds', 'outlet-gateway', 'student-web')
@@ -80,48 +122,15 @@ foreach ($app in $apps) {
 }
 ```
 
-### 2A. Load the development sample dataset
-
-After the Docker backend is running, load the idempotent local sample data:
+### 3. Start and seed the backend
 
 ```powershell
-docker compose run --rm -e MEALY_ALLOW_SAMPLE_DATA=true api node dist/seed.js
-```
-
-This creates two campuses, two canteens, three outlets, counters, terminals, staff/students,
-published menus, variants, add-ons, taxes, inventory, payment methods, printers, live orders,
-tokens, kitchen tickets, 10 tracked dishes, 280 demand-history observations, timetable rush
-windows, pickup slots, and a surplus offer. It is development-only and is never a production migration.
-
-The backend dependencies are installed inside its Docker image. Install them locally only if you plan to compile or run the backend outside Docker.
-
-### 3. Create frontend and gateway environment files
-
-```powershell
-$apps = @('pos', 'admin', 'canteen-admin', 'kds', 'outlet-gateway', 'student-web')
-foreach ($app in $apps) {
-  $target = "apps\$app\.env"
-  if (-not (Test-Path $target)) {
-    Copy-Item "apps\$app\.env.example" $target
-  }
-}
-```
-
-The placeholder outlet, counter, terminal, gateway, and access-token values must be replaced with records created by the backend. Applications intentionally show empty or configuration-error states instead of fake records.
-
-For `apps/student-web/.env`, set `VITE_MEALY_OUTLET_ID` to an outlet UUID that has a published catalog. `VITE_MEALY_API_BASE_URL` defaults to `http://127.0.0.1:8080`.
-
-## Normal startup order
-
-### Step 1: Start the Docker backend
-
-```powershell
-cd C:\Users\Harsh\Desktop\mealy\mealy-platform
 docker compose up -d --build
+docker compose run --rm -e MEALY_ALLOW_SAMPLE_DATA=true api node dist/seed.js
 docker compose ps -a
 ```
 
-Verify it:
+The migration container showing `Exited (0)` is expected. Confirm the services:
 
 ```powershell
 curl.exe --noproxy "*" http://127.0.0.1:8080/health
@@ -129,199 +138,188 @@ curl.exe --noproxy "*" http://127.0.0.1:8080/ready
 curl.exe --noproxy "*" http://127.0.0.1:8081/health
 ```
 
-Expected results:
+Readiness should report schema version `12`.
 
-- API status is `ok`.
-- Readiness status is `ready` with schema version `12`.
-- Realtime status is `ok`.
-- PostgreSQL, API, and realtime containers are healthy.
-- Worker is running.
-- Migration container exited with code `0`.
+### 4. Configure the outlet gateway
 
-### Step 2: Create the first local administrator session
+In `apps/outlet-gateway/.env`, use the Main Food Court outlet/counter/terminal IDs above. Create a long `MEALY_GATEWAY_LAN_TOKEN`, then copy the same value to `VITE_MEALY_GATEWAY_TOKEN` in `apps/kds/.env` and `apps/pos/.env`.
 
-This is needed only when the database is new or when the old session expired. Use the same private bootstrap token configured in `apps/backend/.env`.
+Build the KDS once so the gateway can serve it:
 
 ```powershell
-$bootstrapToken = Read-Host 'Enter MEALY_BOOTSTRAP_ADMIN_TOKEN'
-$body = @{
-  display_name = 'Local Administrator'
-  email = 'admin@local.mealy'
-  device_name = 'Local Windows development'
-} | ConvertTo-Json
-
-$session = Invoke-RestMethod `
-  -Method Post `
-  -Uri 'http://127.0.0.1:8080/v1/auth/bootstrap-session' `
-  -Headers @{ 'X-Mealy-Bootstrap-Token' = $bootstrapToken } `
-  -ContentType 'application/json' `
-  -Body $body
-
-$accessToken = $session.data.token
-$accessToken
-```
-
-Copy the resulting token into:
-
-- `apps/admin/.env` as `VITE_MEALY_ACCESS_TOKEN`
-- `apps/canteen-admin/.env` as `VITE_MEALY_ACCESS_TOKEN`
-- `apps/pos/.env` as `VITE_MEALY_ACCESS_TOKEN`
-
-Restart a frontend after changing its `.env` file.
-
-### Step 3: Start the platform admin
-
-Open a new PowerShell window:
-
-```powershell
-cd C:\Users\Harsh\Desktop\mealy\mealy-platform\apps\admin
-npm run dev -- --port 5174
-```
-
-Open [http://127.0.0.1:5174](http://127.0.0.1:5174). Use this application to create the first campus and onboard a canteen/outlet/counter. The returned identifiers are used by the POS and outlet gateway environment files.
-
-### Step 4: Build and start the outlet gateway
-
-First build the KDS so the gateway can serve it:
-
-```powershell
-cd C:\Users\Harsh\Desktop\mealy\mealy-platform\apps\kds
+cd apps\kds
 npm run build
+cd ..\..
 ```
 
-Configure `apps/outlet-gateway/.env` with the real outlet identity and a long LAN token. Use the same LAN token in `apps/kds/.env`.
+For a cloud-connected gateway, enroll it through the manager/platform setup flow and add the returned token to the gateway environment. LAN-only operation does not require cloud gateway values.
 
-For cloud connectivity, enroll the gateway through the backend and configure:
+## Start the complete system
 
-```text
-MEALY_CLOUD_URL=http://127.0.0.1:8080
-MEALY_CLOUD_REALTIME_URL=ws://127.0.0.1:8081
-MEALY_CLOUD_GATEWAY_TOKEN=<token returned by gateway enrollment>
-```
+Keep Docker running, then use a separate PowerShell window for each interface.
 
-Then start it in another PowerShell window:
+### Outlet gateway and KDS
 
 ```powershell
 cd C:\Users\Harsh\Desktop\mealy\mealy-platform\apps\outlet-gateway
 npm run dev
 ```
 
-Verify the gateway at [http://127.0.0.1:8788/health](http://127.0.0.1:8788/health), then open the built KDS at [http://127.0.0.1:8788/kds/](http://127.0.0.1:8788/kds/).
+Open `http://127.0.0.1:8788/health` and then `http://127.0.0.1:8788/kds/`.
 
-The gateway stores local runtime data in `apps/outlet-gateway/.data/`. That directory is local machine state and is ignored by Git.
-
-### Step 5: Start the POS
-
-Configure `apps/pos/.env` with the API URL, real outlet UUID, counter UUID, optional terminal UUID, and access token. Then open another PowerShell window:
+### Counter POS
 
 ```powershell
 cd C:\Users\Harsh\Desktop\mealy\mealy-platform\apps\pos
 npm run dev
 ```
 
-This starts the renderer on port `5173` and opens the Electron window.
+Seeded cashier login:
 
-### Step 6: Start the canteen-admin application
+```text
+Employee code: CB-CASHIER-01
+PIN: 2468
+```
+
+### Canteen manager
 
 ```powershell
 cd C:\Users\Harsh\Desktop\mealy\mealy-platform\apps\canteen-admin
 npm run dev -- --port 5175
 ```
 
-Open [http://127.0.0.1:5175](http://127.0.0.1:5175).
+Open `http://127.0.0.1:5175` and choose the demo manager workspace.
 
-### Step 7: Start student web
-
-Create `apps/student-web/.env` from its example, set a real published outlet UUID, then run:
+### Student app
 
 ```powershell
 cd C:\Users\Harsh\Desktop\mealy\mealy-platform\apps\student-web
 npm run dev -- --port 5177
 ```
 
-Open [http://127.0.0.1:5177](http://127.0.0.1:5177). This build has no sample menu or fake order records: it will explain when its outlet configuration or catalog is missing.
+Open `http://127.0.0.1:5177` and choose Aarav Sharma or Meera Nair on the sign-in screen.
 
-### Optional: run the KDS as a separate Vite development server
-
-Normally the gateway serves the built KDS. For frontend development:
+### Platform admin (optional)
 
 ```powershell
-cd C:\Users\Harsh\Desktop\mealy\mealy-platform\apps\kds
-npm run dev -- --port 5176
+cd C:\Users\Harsh\Desktop\mealy\mealy-platform\apps\admin
+npm run dev -- --port 5174
 ```
 
-Open [http://127.0.0.1:5176](http://127.0.0.1:5176). Add this origin to `MEALY_GATEWAY_ALLOWED_ORIGINS` in the gateway `.env`.
+## Multi-device demo on a laptop hotspot
 
-## Everyday quick start
+Recommended screen assignment:
 
-After first-time setup, the usual order is:
+- **Laptop:** POS on port `5173` and manager on port `5175`
+- **iPad:** KDS at `http://<LAPTOP-IP>:8788/kds/`
+- **Phone:** student app at `http://<LAPTOP-IP>:5177`
 
-1. Start Docker Desktop.
-2. Run `docker compose up -d` from `mealy-platform`.
-3. Start the outlet gateway with `npm run dev`.
-4. Start only the interfaces you need: POS, platform admin, canteen admin, or student web.
-5. Open the KDS through the gateway at `/kds/`.
+Setup:
 
-You do not need to run the backend API, realtime service, or worker manually when Docker Compose is running them.
+1. Connect the laptop to college Wi-Fi and enable Windows **Mobile hotspot**.
+2. Join the phone and iPad to the laptop hotspot.
+3. Run `ipconfig` and note the IPv4 address of the Mobile Hotspot adapter (often `192.168.137.1`).
+4. In root `.env`, set `MEALY_BIND_ADDRESS=0.0.0.0`.
+5. Use `http://<LAPTOP-IP>:8080` as `VITE_MEALY_API_BASE_URL` for the student and manager apps.
+6. Add the laptop-IP origins for ports `5175` and `5177` to `MEALY_ALLOWED_ORIGINS` in `apps/backend/.env`.
+7. Add `http://<LAPTOP-IP>:8788` to `MEALY_GATEWAY_ALLOWED_ORIGINS` in the gateway environment.
+8. Restart Docker and the affected applications after changing environment files.
 
-## Status, logs, restart, and shutdown
-
-From `mealy-platform`:
+Expose the browser apps to the hotspot:
 
 ```powershell
-# Show every container, including the completed migration container
+# Student app
+npm run dev -- --host 0.0.0.0 --port 5177
+
+# Manager app (run from its own folder)
+npm run dev -- --host 0.0.0.0 --port 5175
+```
+
+If another device cannot connect, allow Node.js and Docker through Windows Firewall on **Private networks**. Do not expose this demo configuration directly to the public internet.
+
+## Suggested live demo
+
+1. Show the student menu, photos, surplus offer, and timetable rush alert on the phone.
+2. Add an item, choose a pickup slot, complete simulated UPI, and show the order token popup.
+3. On the laptop, show the new order in manager/POS and send or confirm its KOT.
+4. On the iPad, open the ticket, mark it preparing, then ready.
+5. Return to the phone and show the live state change and ready notification.
+6. In the manager app, show slot demand, wait time, tomorrow's per-dish forecast, food saved, and leftover logging.
+7. Explain that the gateway/SQLite layer keeps the outlet operating locally if internet access drops.
+
+## Deployment
+
+- Web applications can be deployed to Vercel.
+- The API, realtime service, worker, and PostgreSQL can be deployed to Railway, Render, or another container host.
+- The outlet gateway remains on the canteen computer because it provides LAN/offline operation.
+
+See [docs/HACKATHON_DEPLOY.md](docs/HACKATHON_DEPLOY.md) for the exact Railway/Vercel runbook and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for the broader production checklist.
+
+## Useful operations
+
+```powershell
+# Service status
 docker compose ps -a
 
-# Follow backend logs
+# Backend logs
 docker compose logs -f api realtime worker
 
-# Restart only backend runtime services
+# Restart backend services
 docker compose restart api realtime worker
 
-# Stop the stack but keep PostgreSQL data
+# Stop while preserving database data
 docker compose down
-
-# Start it again without rebuilding
-docker compose up -d
 ```
 
-Do not use `docker compose down -v` unless you intentionally want to delete the local PostgreSQL volume and all local database data.
+Do not run `docker compose down -v` unless you intentionally want to delete the local PostgreSQL volume.
 
-Stop a locally running npm application with `Ctrl+C` in its PowerShell window.
+## Troubleshooting
 
-## Common startup problems
+### `Failed to fetch`
 
-### `MEALY_DB_PASSWORD is missing`
+- Confirm `http://127.0.0.1:8080/health` works on the laptop.
+- On a phone/iPad, never use `localhost` or `127.0.0.1` for the laptop API; use the laptop hotspot IP.
+- Confirm the frontend origin is listed in backend `MEALY_ALLOWED_ORIGINS`.
+- Restart the frontend after editing `.env`.
 
-The root `.env` file is missing or still incomplete. Create it from `.env.docker.example`.
+### Orders do not appear in KDS or manager
 
-### API is healthy but an application is empty
+- Ensure student, POS, manager, and gateway use the same seeded outlet ID.
+- Confirm the gateway health endpoint works and its cloud/gateway token is valid.
+- Confirm Docker API, realtime, and worker services are running.
+- The manager rush board aggregates all outlets in the selected canteen and refreshes automatically.
 
-Dynamic clients do not contain fallback records. Check:
+### Menu photos are missing
 
-- The application `.env` has the API/gateway URL.
-- The access token is present and unexpired.
-- The campus, canteen, outlet, counter, catalog, and gateway records actually exist.
-- The frontend was restarted after its `.env` changed.
+Photos are bundled with the student and POS applications. Restart the relevant Vite server and perform a hard browser refresh after pulling changes.
 
-### `401` or `403` from the backend
+### Port already in use
 
-The session token is missing, expired, or does not have the required permission. Create a new bootstrap session for local development, then update the frontend `.env` files.
+Use the expected allocation: POS `5173`, platform admin `5174`, manager `5175`, standalone KDS `5176`, student `5177`, gateway `8788`, API `8080`, realtime `8081`.
 
-### KDS cannot reach the gateway
+## Repository structure
 
-- Start the outlet gateway first.
-- Confirm [http://127.0.0.1:8788/health](http://127.0.0.1:8788/health) works.
-- Use the same `MEALY_GATEWAY_LAN_TOKEN` and `VITE_MEALY_GATEWAY_TOKEN`.
-- Add the KDS origin to `MEALY_GATEWAY_ALLOWED_ORIGINS`.
+```text
+mealy-platform/
+├── apps/
+│   ├── backend/          API, realtime service, worker, migrations, seed, forecasting
+│   ├── student-web/      student ordering experience
+│   ├── pos/              Electron counter POS
+│   ├── kds/              kitchen display
+│   ├── canteen-admin/    manager workspace
+│   ├── admin/            platform administration
+│   └── outlet-gateway/   offline/LAN gateway and SQLite state
+├── data/                 forecasting sample data
+├── docs/                 architecture, API, operations, security, and deployment
+├── compose.yaml          local PostgreSQL and backend services
+└── CHANGELOG.md
+```
 
-### A frontend port is already in use
+## Scope and production notes
 
-Keep the recommended allocation: POS `5173`, platform admin `5174`, canteen admin `5175`, standalone KDS `5176`, and student web `5177`.
+- The included UPI flow is a **payment simulation**, not a real money transaction. A production payment provider must be connected before accepting payments.
+- Delivery is outside this product's current scope; ThaliTrack focuses on campus counter pickup.
+- Production OTP needs an SMS provider. Local demo identities exist only when demo mode is enabled.
+- Replace all development secrets, restrict allowed origins, configure backups/monitoring, and complete the security/deployment checklist before a real rollout.
 
-## What is not ready yet
-
-- Student sign-in UI and backend OTP contracts exist, but production SMS delivery still needs a provider. Razorpay is selected for online-only student payment and is intentionally not connected yet; the current web supports live catalog browsing, local cart, server pricing quotes, and an honest checkout-readiness state without creating an order or payment.
-- Full authenticated end-to-end workflow testing remains pending.
-- OTP, online payment providers, printers, production gateway certificates, monitoring, backups/restore, and Railway deployment are not production-ready.
-- Unsupported admin features intentionally show unavailable states rather than pretending to save data.
+Further technical references: [architecture](docs/ARCHITECTURE.md), [API](docs/API.md), [security](docs/SECURITY.md), [testing](docs/TESTING.md), and [known issues](docs/KNOWN_ISSUES.md).
