@@ -83,6 +83,7 @@ export default function App() {
   const stats = useMemo(() => aggregatePortfolio(canteens, orders, items, canteenId), [canteenId, canteens, items, orders])
   const scopedOrders = orders.filter((order) => canteenId === 'all' || order.canteenId === canteenId)
   const scopedItems = items.filter((item) => canteenId === 'all' || item.canteenId === canteenId)
+  const dashboardOutletIds = useMemo(() => outlets.filter((outlet) => canteenId === 'all' || outlet.canteenId === canteenId).map((outlet) => outlet.id), [canteenId, outlets])
 
   const notify = useCallback((message: string) => {
     setToast(message)
@@ -220,10 +221,10 @@ export default function App() {
     } catch (error) { notify(error instanceof Error ? error.message : 'Stock adjustment failed.') }
   }
 
-  if (!authenticated) return <ManagerDemoLogin onSignedIn={() => setAuthenticated(true)} />
+  if (!authenticated) return <ManagerLogin onSignedIn={() => setAuthenticated(true)} />
 
   let content: ReactNode
-  if (view === 'overview') content = <><SystemFlow /><ThaliTrackDashboard outletId={outlets.find((outlet) => canteenId === 'all' || outlet.canteenId === canteenId)?.id} items={scopedItems} onNotify={notify} /><Overview canteens={canteens} alerts={alerts} stats={stats} orders={scopedOrders} items={scopedItems} canteenId={canteenId} onOrder={setSelectedOrder} onNavigate={navigate} /></>
+  if (view === 'overview') content = <><SystemFlow /><ThaliTrackDashboard outletIds={dashboardOutletIds} items={scopedItems} onNotify={notify} /><Overview canteens={canteens} alerts={alerts} stats={stats} orders={scopedOrders} items={scopedItems} canteenId={canteenId} onOrder={setSelectedOrder} onNavigate={navigate} /></>
   else if (view === 'records') content = <Records canteens={canteens} orders={scopedOrders} query={query} onOrder={setSelectedOrder} />
   else if (view === 'reports') content = <Reports canteens={canteens} stats={stats} canteenId={canteenId} />
   else if (view === 'alerts') content = <Alerts canteens={canteens} alerts={alerts} canteenId={canteenId} onNotify={notify} />
@@ -256,11 +257,11 @@ export default function App() {
   </div>
 }
 
-function ManagerDemoLogin({ onSignedIn }: { onSignedIn: () => void }) {
+function ManagerLogin({ onSignedIn }: { onSignedIn: () => void }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const signIn = async () => { setBusy(true); setError(null); try { await createDemoManagementSession(); onSignedIn() } catch (reason) { setError(reason instanceof Error ? reason.message : 'Demo manager sign-in failed.') } finally { setBusy(false) } }
-  return <div className="manager-login"><section><img src={mealyLogo} alt="Mealy" /><span>ThaliTrack canteen demo</span><h1>Run the lunch rush</h1><p>Use the seeded canteen manager to receive two-phone orders, update preparation status, log leftovers, and review tomorrow’s ML forecast.</p><button disabled={busy} onClick={() => void signIn()}>{busy ? 'Opening dashboard…' : 'Enter demo dashboard'}</button>{error && <div className="login-error"><AlertTriangle size={16} />{error}</div>}<small>Requires MEALY_DEMO_MODE=true and the sample dataset on the backend.</small></section></div>
+  const signIn = async () => { setBusy(true); setError(null); try { await createDemoManagementSession(); onSignedIn() } catch (reason) { setError(reason instanceof Error ? reason.message : 'Manager sign-in failed.') } finally { setBusy(false) } }
+  return <div className="manager-login"><section><img src={mealyLogo} alt="Mealy" /><span>Canteen management</span><h1>Run the lunch rush</h1><p>Receive student and counter orders, update preparation status, log leftovers, and review tomorrow’s demand forecast.</p><button disabled={busy} onClick={() => void signIn()}>{busy ? 'Opening workspace…' : 'Open manager workspace'}</button>{error && <div className="login-error"><AlertTriangle size={16} />{error}</div>}<small>Manager access is scoped to assigned canteens and outlets.</small></section></div>
 }
 
 function SystemFlow() {
@@ -272,23 +273,32 @@ function SystemFlow() {
     { icon: WifiOff, title: 'Outlet survives internet loss', text: 'The local gateway keeps cash POS, KOT and KDS running with reserved tokens, then syncs after reconnection.' },
     { icon: BarChart3, title: 'Waste becomes tomorrow’s plan', text: 'Closing leftovers plus 28 days of demand update the dish forecast and after-3 PM surplus rescue.' },
   ]
-  return <section className="system-story"><header><div><span>Start here · complete product story</span><h2>One order, from phone to plate</h2><p>ThaliTrack reduces lunch queues and food waste while supporting the counter, kitchen and unreliable campus internet.</p></div><strong>LIVE END-TO-END FLOW</strong></header><div className="system-flow">{steps.map(({ icon: Icon, title, text }, index) => <article key={title}><div><b>{index + 1}</b><Icon size={19} /></div><h3>{title}</h3><p>{text}</p></article>)}</div><footer><span><i className="cloud-dot" /> Cloud: student ordering, manager dashboard and forecasting</span><span><i className="local-dot" /> Outlet LAN: POS, KOT/KDS and offline gateway</span><em>Mock UPI for demo · Counter pickup only</em></footer></section>
+  return <section className="system-story"><header><div><span>Start here · complete product story</span><h2>One order, from phone to plate</h2><p>ThaliTrack reduces lunch queues and food waste while supporting the counter, kitchen and unreliable campus internet.</p></div><strong>LIVE END-TO-END FLOW</strong></header><div className="system-flow">{steps.map(({ icon: Icon, title, text }, index) => <article key={title}><div><b>{index + 1}</b><Icon size={19} /></div><h3>{title}</h3><p>{text}</p></article>)}</div><footer><span><i className="cloud-dot" /> Cloud: student ordering, manager dashboard and forecasting</span><span><i className="local-dot" /> Outlet LAN: POS, KOT/KDS and offline gateway</span><em>UPI simulation in local mode · Counter pickup only</em></footer></section>
 }
 
-function ThaliTrackDashboard({ outletId, items, onNotify }: { outletId?: string; items: MenuItem[]; onNotify: (message: string) => void }) {
+function ThaliTrackDashboard({ outletIds, items, onNotify }: { outletIds: string[]; items: MenuItem[]; onNotify: (message: string) => void }) {
   const [board, setBoard] = useState<RushBoard | null>(null)
   const [forecast, setForecast] = useState<ForecastReport | null>(null)
+  const [forecastOutletId, setForecastOutletId] = useState('')
   const [selectedItem, setSelectedItem] = useState('')
   const [leftoverKg, setLeftoverKg] = useState('1.2')
   const refresh = useCallback(async () => {
-    if (!outletId) return
+    if (!outletIds.length) return
     try {
-      const [nextBoard, nextForecast] = await Promise.all([loadRushBoard(outletId), loadForecast(outletId)])
+      const results = await Promise.all(outletIds.map(async (outletId) => ({ outletId, board: await loadRushBoard(outletId), forecast: await loadForecast(outletId) })))
+      const nextBoard: RushBoard = {
+        orders: results.flatMap((result) => result.board.orders).sort((left, right) => String(left.starts_at ?? left.public_number).localeCompare(String(right.starts_at ?? right.public_number))),
+        slots: results.flatMap((result) => result.board.slots),
+        generated_at: new Date().toISOString(),
+      }
+      const forecastResult = results.find((result) => result.forecast.dishes.length) ?? results[0]!
+      const nextForecast = forecastResult.forecast
+      setForecastOutletId(forecastResult.outletId)
       setBoard(nextBoard); setForecast(nextForecast); setSelectedItem((current) => current || nextForecast.dishes[0]?.catalog_item_id || '')
     } catch (error) { onNotify(error instanceof Error ? error.message : 'ThaliTrack live data could not load.') }
-  }, [onNotify, outletId])
+  }, [onNotify, outletIds])
   useEffect(() => { const initial = window.setTimeout(() => void refresh(), 0); const timer = window.setInterval(() => void refresh(), 3_000); return () => { window.clearTimeout(initial); window.clearInterval(timer) } }, [refresh])
-  if (!outletId) return <section className="panel thali-empty">Select a canteen with an outlet to open ThaliTrack.</section>
+  if (!outletIds.length) return <section className="panel thali-empty">Select a canteen with an outlet to open live operations.</section>
   const move = async (orderId: string, status: string) => {
     try {
       if (status === 'placed') await transitionRushOrder(orderId, 'confirmed')
@@ -299,17 +309,17 @@ function ThaliTrackDashboard({ outletId, items, onNotify }: { outletId?: string;
   }
   const logLeftover = async (event: FormEvent) => {
     event.preventDefault(); if (!selectedItem) return
-    try { await logDishLeftover(outletId, selectedItem, Number(leftoverKg)); await refresh(); onNotify('Leftover kilograms saved and tomorrow’s forecast refreshed.') }
+    try { await logDishLeftover(forecastOutletId || outletIds[0]!, selectedItem, Number(leftoverKg)); await refresh(); onNotify('Leftover kilograms saved and tomorrow’s forecast refreshed.') }
     catch (error) { onNotify(error instanceof Error ? error.message : 'Leftover entry failed.') }
   }
   const publishOffer = async () => {
     if (!selectedItem) return
-    try { await publishSurplusOffer(outletId, selectedItem, 10); onNotify('35% surplus offer scheduled for students after 3 PM.') }
+    try { await publishSurplusOffer(forecastOutletId || outletIds[0]!, selectedItem, 10); onNotify('35% surplus offer scheduled for students after 3 PM.') }
     catch (error) { onNotify(error instanceof Error ? error.message : 'Surplus offer failed.') }
   }
   const maxForecast = Math.max(1, ...(forecast?.dishes.map((dish) => dish.recommendedQuantity) ?? [1]))
-  return <section className="thalitrack-workspace"><header><div><span>Hackathon live operations</span><h2>ThaliTrack rush control</h2><p>Orders refresh every 3 seconds · forecast model {forecast?.model ?? 'loading'}</p></div><div className="saved-card"><small>Estimated food saved</small><strong>{forecast?.estimated_food_saved_kg.toFixed(2) ?? '—'} kg</strong></div></header>
-    <div className="thali-grid"><section className="rush-board"><div className="thali-heading"><h3>Incoming orders by pickup slot</h3><span>{board?.orders.length ?? 0} active</span></div><div className="rush-orders">{board?.orders.length ? board.orders.map((order) => <article key={order.id}><div className="rush-token"><b>{order.token_label ?? '—'}</b><small>{order.starts_at ? new Date(order.starts_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Walk-in'}</small></div><div><strong>{order.customer_name_snapshot}</strong><p>{order.items.map((item) => `${item.quantity}× ${item.name}`).join(', ')}</p><span>{order.status_code.replaceAll('_', ' ')}</span></div>{['placed','confirmed','preparing'].includes(order.status_code) && <button onClick={() => void move(order.id, order.status_code)}>{order.status_code === 'preparing' ? 'Mark ready' : 'Start next'}</button>}</article>) : <div className="thali-empty">Waiting for the first phone order…</div>}</div></section>
+  return <section className="thalitrack-workspace"><header><div><span>Live canteen operations</span><h2>ThaliTrack rush control</h2><p>Orders refresh every 3 seconds · {outletIds.length} outlet{outletIds.length === 1 ? '' : 's'} connected · forecast model {forecast?.model ?? 'loading'}</p></div><div className="saved-card"><small>Estimated food saved</small><strong>{forecast?.estimated_food_saved_kg.toFixed(2) ?? '—'} kg</strong></div></header>
+    <div className="thali-grid"><section className="rush-board"><div className="thali-heading"><h3>Incoming orders by pickup slot</h3><span>{board?.orders.length ?? 0} active</span></div><div className="rush-orders">{board?.orders.length ? board.orders.map((order) => <article key={order.id}><div className="rush-token"><b>{order.token_label ?? '—'}</b><small>{order.starts_at ? new Date(order.starts_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Walk-in'}</small></div><div><strong>{order.customer_name_snapshot}</strong><p>{order.items.map((item) => `${item.quantity}× ${item.name}`).join(', ')}</p><span>{order.status_code.replaceAll('_', ' ')}</span></div>{['placed','confirmed','preparing'].includes(order.status_code) && <button onClick={() => void move(order.id, order.status_code)}>{order.status_code === 'preparing' ? 'Mark ready' : 'Start next'}</button>}</article>) : <div className="thali-empty">No incoming orders right now.</div>}</div></section>
       <section className="forecast-board"><div className="thali-heading"><h3>Tomorrow’s dish forecast</h3><span>{forecast?.target_date ?? 'Loading'}</span></div><div className="forecast-chart">{forecast?.dishes.slice(0, 10).map((dish) => <div key={dish.catalog_item_id}><span>{dish.name}</span><i><b style={{ width: `${Math.max(6, dish.recommendedQuantity / maxForecast * 100)}%` }} /></i><strong>{dish.recommendedQuantity}</strong></div>)}</div></section></div>
     <form className="closing-controls" onSubmit={(event) => void logLeftover(event)}><div><span>Closing workflow</span><h3>Log leftovers and rescue surplus</h3></div><label>Dish<select value={selectedItem} onChange={(event) => setSelectedItem(event.target.value)}>{forecast?.dishes.map((dish) => <option key={dish.catalog_item_id} value={dish.catalog_item_id}>{dish.name}</option>)}{!forecast?.dishes.length && items.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Leftover kg<input type="number" min="0" step="0.1" value={leftoverKg} onChange={(event) => setLeftoverKg(event.target.value)} /></label><button type="submit">Save & retrain</button><button type="button" className="surplus-action" onClick={() => void publishOffer()}>Schedule 35% offer</button></form>
   </section>

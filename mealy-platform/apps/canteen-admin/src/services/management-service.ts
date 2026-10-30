@@ -15,7 +15,7 @@ export async function createDemoManagementSession(): Promise<void> {
   if (!apiBaseUrl) throw new Error('Configure VITE_MEALY_API_BASE_URL.')
   const response = await fetch(`${apiBaseUrl}/v1/auth/demo-session`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ role: 'manager' }) })
   const body = await response.json() as { data?: { token: string }; error?: { message?: string } }
-  if (!response.ok || !body.data?.token) throw new Error(body.error?.message ?? 'Demo manager sign-in failed.')
+  if (!response.ok || !body.data?.token) throw new Error(body.error?.message ?? 'Manager sign-in failed.')
   window.sessionStorage.setItem('mealy-access-token', body.data.token)
 }
 

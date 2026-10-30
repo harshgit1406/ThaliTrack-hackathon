@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-30 - Manager order synchronization
+
+- Fixed the manager rush board to aggregate live orders from every outlet in the selected canteen instead of reading only the first returned outlet.
+- Kept forecast, leftover, and surplus actions attached to the outlet that owns the available demand history.
+- Removed hackathon-labelled copy and badges from active product applications while retaining clearly labelled local payment simulation.
+
 ## 2026-10-30 - Student order notifications
 
 - Added compact added-to-cart confirmations, an order-placed token popup, and live in-app notifications when an order status changes.

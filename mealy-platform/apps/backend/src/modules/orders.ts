@@ -34,7 +34,7 @@ export async function registerOrderRoutes(app: FastifyInstance, pool: pg.Pool, c
     const idempotencyKey = requiredIdempotencyKey(request)
 
     const sourceChannel = input.channel
-    if (input.payment_mode === 'mock_upi' && !config.demoMode) throw new AppError('MOCK_PAYMENT_DISABLED', 'Mock payment is available only in the hackathon demo.', 403)
+    if (input.payment_mode === 'mock_upi' && !config.demoMode) throw new AppError('MOCK_PAYMENT_DISABLED', 'Payment simulation is available only in local demonstration mode.', 403)
     if (sourceChannel === 'student_web' && !input.pickup_slot_id) throw new AppError('PICKUP_SLOT_REQUIRED', 'Choose a pickup slot.', 422)
     const featureCode = sourceChannel === 'student_web' ? 'student_ordering' : sourceChannel === 'kiosk' ? 'qr_ordering' : 'pos'
     await requireOutletFeature(pool, input.outlet_id, featureCode)
