@@ -41,6 +41,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 
 .note-field input { width: 100%; min-height: 44px; padding: 10px; color: #354053; background: #faf8f7; border: 1px solid #eee5e0; border-radius: 11px; font-size: 14px; outline: none; }
 
+.student-journey{margin:14px 0 0;padding:11px;display:grid;grid-template-columns:repeat(3,1fr);gap:8px;background:#fff;border:1px solid #ece4df;border-radius:17px}.student-journey article{min-width:0;display:flex;align-items:center;gap:8px}.student-journey article:not(:last-child){padding-right:8px;border-right:1px solid #eee7e2}.student-journey b{width:25px;height:25px;flex:none;display:grid;place-items:center;color:#fff;background:#f05428;border-radius:8px;font-size:10px}.student-journey div{min-width:0;display:grid;gap:2px}.student-journey strong{color:#3c4658;font-size:10px}.student-journey span{color:#8b95a4;font-size:8px;line-height:1.35}
 .queue-glance { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; }
 .queue-glance > div { min-width: 0; padding: 13px; display: flex; align-items: center; gap: 9px; color: #e85226; background: #fff; border: 1px solid #eee2dc; border-radius: 15px; }
 .queue-glance span { min-width: 0; display: grid; } .queue-glance b { color: #2b3649; font-size: 15px; } .queue-glance small { color: #8b96a5; font-size: 9px; }

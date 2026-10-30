@@ -6,7 +6,7 @@ import {
   ClipboardList, Clock3, CookingPot, Download, FileClock, Gauge, HelpCircle, History, IndianRupee,
   LayoutDashboard, LockKeyhole, Menu as MenuIcon, MonitorCog, MoreHorizontal, PackageOpen,
   Plus, ReceiptText, Search, Settings, ShieldCheck, ShoppingBag, SlidersHorizontal, Store,
-  TicketCheck, ToggleLeft, TrendingUp, UserPlus, Users, UtensilsCrossed, X,
+  TicketCheck, ToggleLeft, TrendingUp, UserPlus, Users, UtensilsCrossed, WifiOff, X,
 } from 'lucide-react'
 import mealyLogo from '../../pos/src/assets/mealy-logo.png'
 import { aggregatePortfolio } from './lib/portfolio'
@@ -223,7 +223,7 @@ export default function App() {
   if (!authenticated) return <ManagerDemoLogin onSignedIn={() => setAuthenticated(true)} />
 
   let content: ReactNode
-  if (view === 'overview') content = <><ThaliTrackDashboard outletId={outlets.find((outlet) => canteenId === 'all' || outlet.canteenId === canteenId)?.id} items={scopedItems} onNotify={notify} /><Overview canteens={canteens} alerts={alerts} stats={stats} orders={scopedOrders} items={scopedItems} canteenId={canteenId} onOrder={setSelectedOrder} onNavigate={navigate} /></>
+  if (view === 'overview') content = <><SystemFlow /><ThaliTrackDashboard outletId={outlets.find((outlet) => canteenId === 'all' || outlet.canteenId === canteenId)?.id} items={scopedItems} onNotify={notify} /><Overview canteens={canteens} alerts={alerts} stats={stats} orders={scopedOrders} items={scopedItems} canteenId={canteenId} onOrder={setSelectedOrder} onNavigate={navigate} /></>
   else if (view === 'records') content = <Records canteens={canteens} orders={scopedOrders} query={query} onOrder={setSelectedOrder} />
   else if (view === 'reports') content = <Reports canteens={canteens} stats={stats} canteenId={canteenId} />
   else if (view === 'alerts') content = <Alerts canteens={canteens} alerts={alerts} canteenId={canteenId} onNotify={notify} />
@@ -261,6 +261,18 @@ function ManagerDemoLogin({ onSignedIn }: { onSignedIn: () => void }) {
   const [error, setError] = useState<string | null>(null)
   const signIn = async () => { setBusy(true); setError(null); try { await createDemoManagementSession(); onSignedIn() } catch (reason) { setError(reason instanceof Error ? reason.message : 'Demo manager sign-in failed.') } finally { setBusy(false) } }
   return <div className="manager-login"><section><img src={mealyLogo} alt="Mealy" /><span>ThaliTrack canteen demo</span><h1>Run the lunch rush</h1><p>Use the seeded canteen manager to receive two-phone orders, update preparation status, log leftovers, and review tomorrow’s ML forecast.</p><button disabled={busy} onClick={() => void signIn()}>{busy ? 'Opening dashboard…' : 'Enter demo dashboard'}</button>{error && <div className="login-error"><AlertTriangle size={16} />{error}</div>}<small>Requires MEALY_DEMO_MODE=true and the sample dataset on the backend.</small></section></div>
+}
+
+function SystemFlow() {
+  const steps = [
+    { icon: ShoppingBag, title: 'Student app or counter POS', text: 'Students pre-order a pickup slot, while staff bill walk-in customers from the same live menu.' },
+    { icon: TicketCheck, title: 'Token + KOT created', text: 'One order creates a pickup token and kitchen order ticket, giving the counter and kitchen one source of truth.' },
+    { icon: CookingPot, title: 'Kitchen prepares', text: 'The KDS or printed KOT shows new orders. Staff move each ticket from new to preparing to ready.' },
+    { icon: ReceiptText, title: 'Pickup without a queue', text: 'The student follows live status and collects by token during the selected 10-minute pickup window.' },
+    { icon: WifiOff, title: 'Outlet survives internet loss', text: 'The local gateway keeps cash POS, KOT and KDS running with reserved tokens, then syncs after reconnection.' },
+    { icon: BarChart3, title: 'Waste becomes tomorrow’s plan', text: 'Closing leftovers plus 28 days of demand update the dish forecast and after-3 PM surplus rescue.' },
+  ]
+  return <section className="system-story"><header><div><span>Start here · complete product story</span><h2>One order, from phone to plate</h2><p>ThaliTrack reduces lunch queues and food waste while supporting the counter, kitchen and unreliable campus internet.</p></div><strong>LIVE END-TO-END FLOW</strong></header><div className="system-flow">{steps.map(({ icon: Icon, title, text }, index) => <article key={title}><div><b>{index + 1}</b><Icon size={19} /></div><h3>{title}</h3><p>{text}</p></article>)}</div><footer><span><i className="cloud-dot" /> Cloud: student ordering, manager dashboard and forecasting</span><span><i className="local-dot" /> Outlet LAN: POS, KOT/KDS and offline gateway</span><em>Mock UPI for demo · Counter pickup only</em></footer></section>
 }
 
 function ThaliTrackDashboard({ outletId, items, onNotify }: { outletId?: string; items: MenuItem[]; onNotify: (message: string) => void }) {
