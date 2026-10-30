@@ -2,6 +2,7 @@ import type { CartLine, MenuItem, PosOrder } from '../types'
 import { createRequestId } from '../lib/request-id'
 
 const apiBaseUrl = (import.meta.env.VITE_MEALY_API_BASE_URL ?? '').trim().replace(/\/$/, '')
+const mediaBaseUrl = (import.meta.env.VITE_MEALY_MEDIA_BASE_URL ?? '').trim().replace(/\/$/, '')
 const outletId = (import.meta.env.VITE_MEALY_OUTLET_ID ?? '').trim()
 const counterId = (import.meta.env.VITE_MEALY_COUNTER_ID ?? '').trim()
 const terminalId = (import.meta.env.VITE_MEALY_TERMINAL_ID ?? '').trim()
@@ -153,6 +154,12 @@ function statusLabel(status: string): PosOrder['status'] {
   return statuses[status] ?? 'New'
 }
 
+function mediaUrl(value: string | null): string | undefined {
+  if (!value) return undefined
+  if (/^(https?:|data:|blob:)/i.test(value)) return value
+  return mediaBaseUrl ? new URL(value, `${mediaBaseUrl}/`).toString() : value
+}
+
 export async function loadMenu(): Promise<MenuItem[]> {
   const response = await apiRequest<CatalogEnvelope>(`/v1/catalog/outlets/${encodeURIComponent(outletId)}`)
   const categories = new Map(response.data.categories.map((category) => [category.id, category.name]))
@@ -162,7 +169,7 @@ export async function loadMenu(): Promise<MenuItem[]> {
     category: item.primary_category_id ? (categories.get(item.primary_category_id) ?? 'Uncategorised') : 'Uncategorised',
     price: Number(item.price_minor),
     description: item.short_description ?? '',
-    image: item.image_url ?? undefined,
+    image: mediaUrl(item.image_url),
     availability: item.is_available ? 'available' : 'sold-out',
   }))
 }
