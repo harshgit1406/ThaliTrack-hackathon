@@ -1,0 +1,22 @@
+name: mealy-database
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${MEALY_DB_NAME:?Set MEALY_DB_NAME}
+      POSTGRES_USER: ${MEALY_DB_USER:?Set MEALY_DB_USER}
+      POSTGRES_PASSWORD: ${MEALY_DB_PASSWORD:?Set MEALY_DB_PASSWORD}
+    ports:
+      - "${MEALY_DB_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    volumes:
+      - mealy_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  mealy_postgres_data:

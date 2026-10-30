@@ -1,0 +1,35 @@
+# Legacy/reference repositories are intentionally read-only from this workspace.
+/mealyapp/
+/mealy-backend/
+
+# Local/editor/OS artifacts
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.tmp
+*.log
+
+# Secrets and local environment overrides
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Dependencies, generated output, test output, and caches
+node_modules/
+vendor/
+dist/
+build/
+.next/
+coverage/
+test-results/
+playwright-report/
+.artifacts/
+.data/
+.cache/
+tmp/
+temp/
+*.tsbuildinfo
+release/
