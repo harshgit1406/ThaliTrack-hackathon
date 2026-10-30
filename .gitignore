@@ -10,6 +10,7 @@ Thumbs.db
 *.swp
 *.tmp
 *.log
+~$*.pptx
 
 # Secrets and local environment overrides
 .env
