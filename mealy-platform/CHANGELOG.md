@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-30 - POS menu photos made self-contained
+
+- Bundled the ten hackathon menu photos with the POS so catalog cards no longer depend on the student-web development server.
+- Kept an optional media-origin setting for deployments that later move catalog images to object storage or a CDN.
+
 ## 2026-10-30
 
 - Added a repository-backed ThaliTrack hackathon gap analysis, focused P0/P1 scope, technical design, Railway/Vercel deployment plan, sequenced verification checklist, and explicit payment/authentication decision gates.
