@@ -64,9 +64,10 @@ export class CloudSocket {
       if (message.type !== 'events') return
       let acknowledged = this.repository.getCloudCursor()
       for (const event of message.events) {
-        if (event.sequence <= acknowledged) continue
-        if (event.payload.order) this.repository.ingestCloudOrder(event.payload.order, event.sequence)
-        acknowledged = event.sequence
+        const sequence = Number(event.sequence)
+        if (!Number.isSafeInteger(sequence) || sequence <= acknowledged) continue
+        if (event.payload.order) this.repository.ingestCloudOrder(event.payload.order, sequence)
+        acknowledged = sequence
       }
       if (acknowledged === message.through_sequence) this.send({ type: 'ack', sequence: acknowledged })
     } catch (error) {
